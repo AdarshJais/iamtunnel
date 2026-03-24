@@ -4,7 +4,7 @@
 
 Connect to your RDS, Redis, and internal services through AWS SSM — without touching the terminal.
 
-**[Website](https://iamtunnel.com)** · **[Download](https://github.com/AdarshJais/iamtunnel/releases/download/v1.0.0/iamtunnel.dmg)** · **[Releases](https://github.com/AdarshJais/iamtunnel/releases)**
+**[Website](https://iamtunnel.com)** · **[Download](https://github.com/AdarshJais/iamtunnel/releases/download/v1.0.1/iamtunnel.dmg)** · **[Releases](https://github.com/AdarshJais/iamtunnel/releases)**
 
 ---
 
