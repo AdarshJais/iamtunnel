@@ -7,7 +7,7 @@ class ConnectionStore {
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first!
-        let dir = appSupport.appendingPathComponent("ssm-tunnel-manager")
+        let dir = appSupport.appendingPathComponent("iamtunnel")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("connections.json")
     }()
