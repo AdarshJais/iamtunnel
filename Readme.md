@@ -30,6 +30,19 @@ The app checks for all of these on launch and shows a warning if anything is mis
 
 ---
 
+## Open tunnels from scripts and coding agents
+
+iamtunnel 1.2.0+ handles `iamtunnel://` links, so a script or an agent like Claude Code
+can ask for a saved tunnel and just wait for the port:
+
+```bash
+open -g "iamtunnel://connect?name=My%20DB"      # or ?port=3307
+open -g "iamtunnel://disconnect?name=My%20DB"
+```
+
+The MFA prompt appears only when the session has expired. Already-open ports are left
+alone, and tunnels marked **production** are never opened by a link.
+
 ## MFA
 
 Most orgs now require an MFA-authenticated session for CLI actions, which means a
