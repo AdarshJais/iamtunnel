@@ -179,6 +179,14 @@ class TunnelManager: ObservableObject {
         onStatusChange(.stopped)
     }
 
+    // True when any saved tunnel using this profile has its local port open.
+    func hasConnectedTunnel(profile: String) -> Bool {
+        let key = profile.isEmpty ? "default" : profile
+        return ConnectionStore.shared.load().contains { tunnel in
+            (tunnel.profile.isEmpty ? "default" : tunnel.profile) == key && portInUse(tunnel.localPort) != nil
+        }
+    }
+
     // ── Disconnect all ───────────────────────────────────────
     func disconnectAll() {
         let snapshot = lock.sync { pids }

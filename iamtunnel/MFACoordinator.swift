@@ -55,26 +55,30 @@ final class MFACoordinator: NSObject, NSWindowDelegate {
 
     // Renew before expiry: prompt for a fresh code but keep the current
     // session if the user cancels, so running tunnels aren't affected.
-    func renewSession(for profile: String) {
+    // `quiet`: shown in front without taking keyboard focus (automatic prompts),
+    // so someone typing elsewhere doesn't type into the code box.
+    func renewSession(for profile: String, quiet: Bool = false) {
         let key = normalize(profile)
         guard waiters[key] == nil else { return }
         waiters[key] = []
         present(profile: key,
-                reason: "Enter a fresh code to extend the \"\(key)\" session before it expires.")
+                reason: "Enter a fresh code to extend the \"\(key)\" session before it expires.",
+                quiet: quiet)
     }
 
     // Session died mid-use — re-prompt without blocking a caller.
-    func promptExpired(profile: String) {
+    func promptExpired(profile: String, quiet: Bool = false) {
         let key = normalize(profile)
         NotificationManager.shared.notifyMFAExpired(profile: key)
         guard waiters[key] == nil else { return }
         waiters[key] = []
         present(profile: key,
-                reason: "Your MFA session for \"\(key)\" expired. Enter a fresh code to continue.")
+                reason: "Your MFA session for \"\(key)\" expired. Enter a fresh code to continue.",
+                quiet: quiet)
     }
 
     // ── Window plumbing ────────────────────────────────────
-    private func present(profile: String, reason: String?) {
+    private func present(profile: String, reason: String?, quiet: Bool = false) {
         // Replacing a prompt for a different profile must not strand its waiters.
         if let outgoing = presentedProfile, outgoing != profile {
             finish(profile: outgoing, success: false)
@@ -99,8 +103,12 @@ final class MFACoordinator: NSObject, NSWindowDelegate {
         self.window = window
         self.presentedProfile = profile
 
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if quiet {
+            window.orderFrontRegardless()
+        } else {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 
     private func finish(profile: String, success: Bool) {

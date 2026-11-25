@@ -12,9 +12,22 @@ struct MFASession: Codable {
     // Treat a session as dead slightly early so a tunnel never starts
     // with credentials that expire mid-handshake.
     static let safetyMargin: TimeInterval = 120
-    // Show the session as "expiring soon" (orange + notification) this early.
-    static let warnBefore: TimeInterval = 15 * 60
+    static let maxDuration = 12 * 3600
+    // Orange + notification from 20 min before expiry, red from 10 min.
+    static let warnBefore: TimeInterval = 20 * 60
+    static let urgentBefore: TimeInterval = 10 * 60
     var isExpiringSoon: Bool { isValid && remaining <= MFASession.warnBefore }
+    var isUrgent: Bool { isValid && remaining <= MFASession.urgentBefore }
+
+    // Menu bar countdown: "11h 42m", "42m", then "9:41" in the last 10 minutes.
+    var countdownLabel: String {
+        let seconds = Int(remaining)
+        if remaining <= MFASession.urgentBefore {
+            return String(format: "%d:%02d", seconds / 60, seconds % 60)
+        }
+        let minutes = Int(ceil(remaining / 60))
+        return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"
+    }
 
     var isValid: Bool { expiration.timeIntervalSinceNow > MFASession.safetyMargin }
     var remaining: TimeInterval { max(0, expiration.timeIntervalSinceNow) }
@@ -39,6 +52,7 @@ enum MFAError: LocalizedError {
     case invalidCode
     case cliFailure(String)
     case parseFailure
+    case diagnosed(Diagnosis)
 
     var errorDescription: String? {
         switch self {
@@ -52,6 +66,8 @@ enum MFAError: LocalizedError {
             return message
         case .parseFailure:
             return "Could not read the credentials returned by AWS STS."
+        case .diagnosed(let diagnosis):
+            return diagnosis.title
         }
     }
 }
@@ -192,6 +208,12 @@ final class AWSSession: ObservableObject {
 
         let key = profile.isEmpty ? "default" : profile
 
+        // Catch a broken profile (leftover token, no keys) before AWS gives a
+        // misleading error such as "MFA device not found".
+        if let diagnosis = AWSDoctor.preflight(profile: key) {
+            return .failure(.diagnosed(diagnosis))
+        }
+
         let resolvedSerial: String?
         if let override = serialOverride?.trimmingCharacters(in: .whitespacesAndNewlines),
            override.hasPrefix("arn:") {
@@ -202,10 +224,15 @@ final class AWSSession: ObservableObject {
         }
 
         guard let serial = resolvedSerial else {
+            // No device found: often the keys themselves are rejected.
+            if let diagnosis = await AWSDoctor.checkKeys(profile: key).diagnosis {
+                return .failure(.diagnosed(diagnosis))
+            }
             return .failure(.noDevice(key))
         }
 
-        let duration = max(900, min(129_600, durationHours * 3600))
+        // Capped at 12 h on purpose (AWS would allow 36 h for IAM users).
+        let duration = max(900, min(MFASession.maxDuration, durationHours * 3600))
 
         let result = await AWSCLI.shared.run([
             "sts", "get-session-token",
@@ -217,6 +244,9 @@ final class AWSSession: ObservableObject {
 
         guard result.succeeded else {
             let message = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let diagnosis = await AWSDoctor.diagnose(profile: key, stderr: message) {
+                return .failure(.diagnosed(diagnosis))
+            }
             // A wrong serial number is reported the same way as a bad code, so
             // clear the cached ARN and let the user correct it.
             if message.contains("MultiFactorAuthentication failed with invalid MFA one time pass code")

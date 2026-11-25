@@ -55,6 +55,26 @@ struct SettingsView: View {
                     .padding(.vertical, 10)
                     Divider().padding(.leading, 52)
 
+                    HStack(spacing: 12) {
+                        Image(systemName: "stethoscope")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Setup check")
+                                .font(.system(size: 13))
+                            Text("Checks AWS CLI, keys, MFA device, clock and tunnels, with a fix for each")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                        Button("Run…") { (NSApp.delegate as? AppDelegate)?.openSetup() }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    Divider().padding(.leading, 52)
+
                     // ── General ──────────────────────────────────
                     SectionLabel("General")
 
@@ -87,6 +107,14 @@ struct SettingsView: View {
                         title: "Show active count",
                         subtitle: "Display active tunnel count in menu bar icon",
                         isOn: $settings.showActiveCount
+                    )
+                    Divider().padding(.leading, 52)
+
+                    SettingsRow(
+                        icon: "clock",
+                        title: "Show MFA time left",
+                        subtitle: "Session time next to the menu bar icon; orange under 20 min, red under 10",
+                        isOn: $settings.showSessionTime
                     )
                 }
             }

@@ -24,7 +24,18 @@ class SettingsManager: ObservableObject {
     }
 
     @Published var showActiveCount: Bool = true {
-        didSet { UserDefaults.standard.set(showActiveCount, forKey: "showActiveCount") }
+        didSet {
+            UserDefaults.standard.set(showActiveCount, forKey: "showActiveCount")
+            NotificationCenter.default.post(name: .menuBarSettingsChanged, object: nil)
+        }
+    }
+
+    // MFA session time left next to the menu bar icon ("11h", orange "12m" near expiry).
+    @Published var showSessionTime: Bool = true {
+        didSet {
+            UserDefaults.standard.set(showSessionTime, forKey: "showSessionTime")
+            NotificationCenter.default.post(name: .menuBarSettingsChanged, object: nil)
+        }
     }
 
     // Org policy: IAM requires an MFA-authenticated session for CLI actions.
@@ -47,6 +58,7 @@ class SettingsManager: ObservableObject {
         notifyOnConnect    = UserDefaults.standard.object(forKey: "notifyOnConnect")    as? Bool ?? true
         notifyOnDisconnect = UserDefaults.standard.object(forKey: "notifyOnDisconnect") as? Bool ?? true
         showActiveCount    = UserDefaults.standard.object(forKey: "showActiveCount")    as? Bool ?? true
+        showSessionTime    = UserDefaults.standard.object(forKey: "showSessionTime")    as? Bool ?? true
         requireMFA         = UserDefaults.standard.object(forKey: "requireMFA")         as? Bool ?? true
         notifyOnMFASession = UserDefaults.standard.object(forKey: "notifyOnMFASession") as? Bool ?? true
         mfaDurationHours   = UserDefaults.standard.object(forKey: "mfaDurationHours")   as? Int  ?? 12
@@ -70,4 +82,8 @@ class SettingsManager: ObservableObject {
             }
         }
     }
+}
+
+extension Notification.Name {
+    static let menuBarSettingsChanged = Notification.Name("menuBarSettingsChanged")
 }
