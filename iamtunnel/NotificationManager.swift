@@ -62,6 +62,11 @@ class NotificationManager {
         )
     }
 
+    // Always shown: the caller (often a script) has no other way to learn why.
+    func notifyLinkRejected(reason: String) {
+        send(title: "iamtunnel link not run", body: reason, identifier: "link-rejected")
+    }
+
     private func send(title: String, body: String, identifier: String) {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             guard settings.authorizationStatus == .authorized else {

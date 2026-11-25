@@ -76,6 +76,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // iamtunnel://connect?name=… / ?port=…, iamtunnel://disconnect?…
+    func application(_ application: NSApplication, open urls: [URL]) {
+        urls.forEach { URLCommandHandler.shared.handle($0) }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         sessionTimer?.invalidate()
         TunnelManager.shared.disconnectAll()
@@ -157,4 +162,5 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 // Notification name for tunnel status changes
 extension Notification.Name {
     static let tunnelStatusChanged = Notification.Name("tunnelStatusChanged")
+    static let tunnelStatusChangedByLink = Notification.Name("tunnelStatusChangedByLink")
 }

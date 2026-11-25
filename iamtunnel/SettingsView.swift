@@ -31,6 +31,30 @@ struct SettingsView: View {
                         Divider().padding(.leading, 52)
                     }
 
+                    // ── Connections ──────────────────────────────
+                    SectionLabel("Connections")
+
+                    HStack(spacing: 12) {
+                        Image(systemName: "square.and.arrow.down.on.square")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Share tunnels")
+                                .font(.system(size: 13))
+                            Text("Import a team's connections file, or export yours. No credentials included.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                        Button("Import…") { ConnectionImporter.chooseAndImport() }
+                        Button("Export…") { ConnectionImporter.chooseAndExport() }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    Divider().padding(.leading, 52)
+
                     // ── General ──────────────────────────────────
                     SectionLabel("General")
 
@@ -69,7 +93,7 @@ struct SettingsView: View {
 
             // ── Version ──────────────────────────────────────────
             Divider()
-            Text("iamtunnel v1.1")
+            Text("iamtunnel v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
                 .padding(.vertical, 10)
