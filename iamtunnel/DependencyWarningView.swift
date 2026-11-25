@@ -12,27 +12,41 @@ struct DependencyWarningView: View {
         return items
     }
 
+    // MFA alone is a one-click fix, so it gets its own bar copy.
+    private var isMFAOnly: Bool { missingItems.isEmpty && !status.mfaReady }
+
     var body: some View {
         VStack(spacing: 0) {
             // ── Compact warning bar ──────────────────────────
             HStack(spacing: 7) {
-                Image(systemName: "exclamationmark.triangle.fill")
+                Image(systemName: isMFAOnly ? "lock.shield" : "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
                     .font(.system(size: 11))
 
-                Text("Missing: \(missingItems.joined(separator: ", "))")
+                Text(isMFAOnly
+                     ? status.mfaDetail
+                     : "Missing: \(missingItems.joined(separator: ", "))")
                     .font(.system(size: 12))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
 
                 Spacer()
 
-                Button(expanded ? "Hide" : "Details") {
-                    withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+                if isMFAOnly {
+                    Button("Authenticate") {
+                        Task { await MFACoordinator.shared.ensureSession(for: firstPendingProfile()) }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.accentColor)
+                } else {
+                    Button(expanded ? "Hide" : "Details") {
+                        withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.accentColor)
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 11))
-                .foregroundStyle(Color.accentColor)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
@@ -54,6 +68,13 @@ struct DependencyWarningView: View {
                 .background(Color.orange.opacity(0.04))
             }
         }
+    }
+
+    // First profile still waiting on an MFA session.
+    private func firstPendingProfile() -> String {
+        let profiles = ConnectionStore.shared.load()
+            .map { $0.profile.isEmpty ? "default" : $0.profile }
+        return profiles.first { AWSSession.shared.validSession(for: $0) == nil } ?? "default"
     }
 }
 

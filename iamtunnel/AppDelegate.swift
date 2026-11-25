@@ -13,6 +13,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
     var settingsWindow: NSWindow?
+    private var sessionTimer: Timer?
+    // Sessions already warned about, keyed by profile + expiry, so each
+    // session gets one "expiring soon" notice.
+    private var warnedSessions: Set<String> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -47,9 +51,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             name: .tunnelStatusChanged,
             object: nil
         )
+
+        // 4. Watch MFA session expiry (STS tokens are short-lived)
+        startSessionExpiryWatch()
+    }
+
+    // ── MFA session expiry watcher ───────────────────────────
+    private func startSessionExpiryWatch() {
+        sessionTimer?.invalidate()
+        sessionTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
+            guard SettingsManager.shared.requireMFA else { return }
+            for profile in AWSSession.shared.activeProfiles {
+                guard let session = AWSSession.shared.validSession(for: profile),
+                      session.remaining <= MFASession.warnBefore else { continue }
+                let key = "\(profile)-\(session.expiration.timeIntervalSince1970)"
+                if self.warnedSessions.insert(key).inserted {
+                    NotificationManager.shared.notifyMFAExpiringSoon(session: session)
+                }
+            }
+            for profile in AWSSession.shared.pruneExpired() {
+                debugLog("🔐 MFA session expired for \(profile)")
+                NotificationManager.shared.notifyMFAExpired(profile: profile)
+            }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        sessionTimer?.invalidate()
         TunnelManager.shared.disconnectAll()
     }
 
@@ -93,7 +121,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let window = NSWindow(contentViewController: hosting)
             window.title = "Settings"
             window.styleMask = NSWindow.StyleMask([.titled, .closable])
-            window.setContentSize(NSSize(width: 380, height: 300))
+            window.setContentSize(NSSize(width: 400, height: 440))
             window.isReleasedWhenClosed = false
             window.center()
             settingsWindow = window

@@ -27,11 +27,29 @@ class SettingsManager: ObservableObject {
         didSet { UserDefaults.standard.set(showActiveCount, forKey: "showActiveCount") }
     }
 
+    // Org policy: IAM requires an MFA-authenticated session for CLI actions.
+    // On by default — turn it off only for accounts without the MFA condition.
+    @Published var requireMFA: Bool = true {
+        didSet { UserDefaults.standard.set(requireMFA, forKey: "requireMFA") }
+    }
+
+    // Duration passed to `sts get-session-token --duration-seconds`.
+    @Published var mfaDurationHours: Int = 12 {
+        didSet { UserDefaults.standard.set(mfaDurationHours, forKey: "mfaDurationHours") }
+    }
+
+    @Published var notifyOnMFASession: Bool = true {
+        didSet { UserDefaults.standard.set(notifyOnMFASession, forKey: "notifyOnMFASession") }
+    }
+
     init() {
         // Load saved preferences
         notifyOnConnect    = UserDefaults.standard.object(forKey: "notifyOnConnect")    as? Bool ?? true
         notifyOnDisconnect = UserDefaults.standard.object(forKey: "notifyOnDisconnect") as? Bool ?? true
         showActiveCount    = UserDefaults.standard.object(forKey: "showActiveCount")    as? Bool ?? true
+        requireMFA         = UserDefaults.standard.object(forKey: "requireMFA")         as? Bool ?? true
+        notifyOnMFASession = UserDefaults.standard.object(forKey: "notifyOnMFASession") as? Bool ?? true
+        mfaDurationHours   = UserDefaults.standard.object(forKey: "mfaDurationHours")   as? Int  ?? 12
 
         // Check current launch at login state
         if #available(macOS 13.0, *) {

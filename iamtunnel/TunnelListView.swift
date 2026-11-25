@@ -4,7 +4,13 @@ struct TunnelListView: View {
     @State private var tunnels: [Tunnel] = ConnectionStore.shared.load()
     @State private var connectionWindow: NSWindow?
     @State private var editWindow: NSWindow?
-    @State private var depStatus: DependencyStatus = DependencyStatus()
+    // nil until the first check finishes: the default status is "all missing",
+    // so showing it straight away flashed a false warning on every open.
+    // The last result is kept so reopening the popover starts from it.
+    private static var lastDepStatus: DependencyStatus?
+    @State private var depStatus: DependencyStatus? = TunnelListView.lastDepStatus
+    @ObservedObject private var session = AWSSession.shared
+    @ObservedObject private var settings = SettingsManager.shared
 
     // ── Dynamic height calculation ───────────────────────────
     private let rowHeight: CGFloat = 52
@@ -14,8 +20,23 @@ struct TunnelListView: View {
 
     private var popoverHeight: CGFloat {
         if tunnels.isEmpty { return emptyHeight }
-        let depHeight: CGFloat = depStatus.allGood ? 0 : 44
-        return min(baseHeight + depHeight + CGFloat(tunnels.count) * rowHeight, maxHeight)
+        let depHeight: CGFloat = showDepWarning ? 44 : 0
+        let mfaHeight: CGFloat = mfaProfiles.isEmpty ? 0 : CGFloat(mfaProfiles.count) * 34 + 1
+        return min(baseHeight + depHeight + mfaHeight + CGFloat(tunnels.count) * rowHeight, maxHeight)
+    }
+
+    private var showDepWarning: Bool { depStatus.map { !$0.allGood } ?? false }
+
+    // Profiles the saved tunnels use; one MFA status line each.
+    private var mfaProfiles: [String] {
+        // Only profiles with a live session: "no session" is already shown by
+        // the dependency banner's Authenticate action. `revision` is read so
+        // this recomputes when a session starts, is renewed or expires.
+        guard settings.requireMFA else { return [] }
+        _ = session.revision
+        return Array(Set(tunnels.map { $0.profile.isEmpty ? "default" : $0.profile }))
+            .filter { AWSSession.shared.session(for: $0)?.isValid == true }
+            .sorted()
     }
 
     var body: some View {
@@ -23,8 +44,16 @@ struct TunnelListView: View {
             Color.clear.frame(height: 4)
 
             // ── Dependency warning ───────────────────────────
-            if !depStatus.allGood {
+            if showDepWarning, let depStatus {
                 DependencyWarningView(status: depStatus)
+                Divider()
+            }
+
+            // ── MFA session expiry ───────────────────────────
+            if !mfaProfiles.isEmpty {
+                ForEach(mfaProfiles, id: \.self) { profile in
+                    MFASessionStatusRow(profile: profile, revision: session.revision)
+                }
                 Divider()
             }
 
@@ -100,7 +129,7 @@ struct TunnelListView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             debugLog("👀 TunnelListView appeared")
-            depStatus = DependencyChecker.shared.check()
+            refreshDependencies()
             updatePopoverSize()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 detectExistingTunnels()
@@ -109,6 +138,22 @@ struct TunnelListView: View {
         }
         .onChange(of: tunnels.count) { _ in
             updatePopoverSize()
+        }
+        // Re-check the banner whenever an MFA session starts or expires.
+        .onChange(of: session.revision) { _ in
+            refreshDependencies()
+        }
+    }
+
+    // ── Dependency + MFA status (off the main thread) ────────
+    private func refreshDependencies() {
+        Task {
+            let status = await DependencyChecker.shared.checkAsync()
+            await MainActor.run {
+                depStatus = status
+                TunnelListView.lastDepStatus = status
+                updatePopoverSize()
+            }
         }
     }
 
@@ -213,6 +258,52 @@ struct TunnelListView: View {
             object: nil,
             userInfo: ["activeCount": count]
         )
+    }
+}
+
+// ── MFA session status row ───────────────────────────────────
+// "MFA default · until 21:40 · 3h 12m left  [Renew]". Turns orange in the
+// last 15 min and red when there is no session, so anyone can add a fresh
+// code before tunnels start failing.
+struct MFASessionStatusRow: View {
+    let profile: String
+    let revision: Int  // re-render when a session starts or is cleared
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { _ in
+            let current = AWSSession.shared.session(for: profile).flatMap { $0.isValid ? $0 : nil }
+            let color: Color = current == nil ? .red : (current!.isExpiringSoon ? .orange : .green)
+            HStack(spacing: 8) {
+                Image(systemName: current == nil ? "lock.slash" : "lock.shield")
+                    .font(.system(size: 12))
+                    .foregroundStyle(color)
+                    .frame(width: 16)
+                Group {
+                    if let s = current {
+                        Text("MFA \(profile) · until \(s.expiresAtLabel) · \(s.remainingLabel)")
+                    } else {
+                        Text("MFA \(profile) · no active session")
+                    }
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(current?.isExpiringSoon == true || current == nil ? color : .secondary)
+                .lineLimit(1)
+                Spacer()
+                Button(current == nil ? "Authenticate" : "Renew") {
+                    Task { @MainActor in
+                        if current == nil {
+                            await MFACoordinator.shared.ensureSession(for: profile)
+                        } else {
+                            MFACoordinator.shared.renewSession(for: profile)
+                        }
+                    }
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 12, weight: .medium))
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 34)
+        }
     }
 }
 
