@@ -139,6 +139,15 @@ struct TunnelListView: View {
         .onChange(of: tunnels.count) { _ in
             updatePopoverSize()
         }
+        // A tunnel opened or closed by an iamtunnel:// link.
+        .onReceive(NotificationCenter.default.publisher(for: .tunnelStatusChangedByLink)) { note in
+            guard let id = note.userInfo?["id"] as? UUID,
+                  let raw = note.userInfo?["status"] as? String,
+                  let status = TunnelStatus(rawValue: raw),
+                  let i = tunnels.firstIndex(where: { $0.id == id }) else { return }
+            tunnels[i].status = status
+            postActiveCount()
+        }
         // Re-check the banner whenever an MFA session starts or expires.
         .onChange(of: session.revision) { _ in
             refreshDependencies()
