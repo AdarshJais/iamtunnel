@@ -34,6 +34,34 @@ class NotificationManager {
         )
     }
 
+    // ── MFA session notifications ────────────────────────────
+    func notifyMFASession(session: MFASession) {
+        guard UserDefaults.standard.object(forKey: "notifyOnMFASession") as? Bool ?? true else { return }
+        send(
+            title: "MFA session active",
+            body: "\(session.profile) — expires \(session.expiresAtLabel) (\(session.remainingLabel))",
+            identifier: "mfa-session-\(session.profile)"
+        )
+    }
+
+    func notifyMFAExpiringSoon(session: MFASession) {
+        guard UserDefaults.standard.object(forKey: "notifyOnMFASession") as? Bool ?? true else { return }
+        send(
+            title: "MFA session expiring soon",
+            body: "\(session.profile) expires at \(session.expiresAtLabel) (\(session.remainingLabel)). Click Renew in iamtunnel to add a fresh code.",
+            identifier: "mfa-expiring-\(session.profile)"
+        )
+    }
+
+    func notifyMFAExpired(profile: String) {
+        guard UserDefaults.standard.object(forKey: "notifyOnMFASession") as? Bool ?? true else { return }
+        send(
+            title: "MFA session expired",
+            body: "Re-authenticate profile \(profile) to keep tunnels running",
+            identifier: "mfa-expired-\(profile)"
+        )
+    }
+
     private func send(title: String, body: String, identifier: String) {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             guard settings.authorizationStatus == .authorized else {

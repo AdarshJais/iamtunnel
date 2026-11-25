@@ -5,6 +5,7 @@ enum TestResult {
     case testing
     case success(String)
     case failure(String)
+    case mfaRequired(String)
 }
 
 class ConnectionTester {
@@ -12,6 +13,12 @@ class ConnectionTester {
 
     // Resolves instance ID from Name tag if needed, then checks SSM
     func test(tunnel: Tunnel) async -> TestResult {
+
+        // Step 0 — MFA session must exist before any signed call
+        if SettingsManager.shared.requireMFA,
+           AWSSession.shared.validSession(for: tunnel.profile) == nil {
+            return .mfaRequired("MFA session needed for profile \"\(tunnel.profile)\"")
+        }
 
         // Step 1 — resolve SSM target
         let instanceId: String
@@ -21,6 +28,7 @@ class ConnectionTester {
             switch await resolveNameTag(tunnel: tunnel) {
             case .success(let id): instanceId = id
             case .failure(let msg): return .failure(msg)
+            case .mfaRequired(let msg): return .mfaRequired(msg)
             default: return .failure("Unknown error")
             }
         }
@@ -29,20 +37,33 @@ class ConnectionTester {
         return await checkSSM(instanceId: instanceId, tunnel: tunnel)
     }
 
+    // ── Verify the MFA session itself ────────────────────────
+    // Mirrors `aws sts get-caller-identity` from the runbook.
+    func testIdentity(profile: String) async -> TestResult {
+        guard let arn = await AWSSession.shared.verifyCallerIdentity(profile: profile) else {
+            return .mfaRequired("No valid session for \"\(profile)\" — authenticate with MFA")
+        }
+        return .success("Authenticated as \(arn)")
+    }
+
     // ── Resolve EC2 Name tag → instance ID ───────────────────
     private func resolveNameTag(tunnel: Tunnel) async -> TestResult {
-        var args = [
+        let args = [
             "ec2", "describe-instances",
             "--filters", "Name=tag:Name,Values=\(tunnel.ssmTarget)",
             "--query", "Reservations[0].Instances[0].InstanceId",
             "--output", "text",
             "--region", tunnel.region
         ]
-        if !tunnel.profile.isEmpty { args += ["--profile", tunnel.profile] }
 
-        let result = await run("aws", args: args)
-        let id = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        let result = await AWSCLI.shared.run(args, profile: tunnel.profile)
 
+        if result.needsMFA {
+            AWSSession.shared.clearSession(for: tunnel.profile)
+            return .mfaRequired("MFA session expired — authenticate again")
+        }
+
+        let id = result.output
         if id.isEmpty || id == "None" {
             return .failure("No instance found with Name tag '\(tunnel.ssmTarget)'")
         }
@@ -51,17 +72,22 @@ class ConnectionTester {
 
     // ── Quick SSM reachability check ─────────────────────────
     private func checkSSM(instanceId: String, tunnel: Tunnel) async -> TestResult {
-        var args = [
+        let args = [
             "ssm", "describe-instance-information",
             "--filters", "Key=InstanceIds,Values=\(instanceId)",
             "--query", "InstanceInformationList[0].PingStatus",
             "--output", "text",
             "--region", tunnel.region
         ]
-        if !tunnel.profile.isEmpty { args += ["--profile", tunnel.profile] }
 
-        let result = await run("aws", args: args)
-        let status = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        let result = await AWSCLI.shared.run(args, profile: tunnel.profile)
+
+        if result.needsMFA {
+            AWSSession.shared.clearSession(for: tunnel.profile)
+            return .mfaRequired("MFA session expired — authenticate again")
+        }
+
+        let status = result.output
 
         if status == "Online" {
             return .success("Instance is online and reachable via SSM")
@@ -69,35 +95,6 @@ class ConnectionTester {
             return .failure("Instance not found in SSM — check IAM permissions or SSM agent")
         } else {
             return .failure("Instance SSM status: \(status)")
-        }
-    }
-
-    // ── Generic process runner ────────────────────────────────
-    @discardableResult
-    private func run(_ command: String, args: [String]) async -> String {
-        await withCheckedContinuation { continuation in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = [command] + args
-
-            // Inherit PATH so aws is found
-            var env = ProcessInfo.processInfo.environment
-            env["PATH"] = "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:" + (env["PATH"] ?? "")
-            process.environment = env
-
-            let pipe = Pipe()
-            let errPipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = errPipe
-
-            do {
-                try process.run()
-                process.waitUntilExit()
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                continuation.resume(returning: String(data: data, encoding: .utf8) ?? "")
-            } catch {
-                continuation.resume(returning: "")
-            }
         }
     }
 }

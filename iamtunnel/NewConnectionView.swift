@@ -173,6 +173,23 @@ struct NewConnectionView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.red)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                } else if case .mfaRequired(let msg) = testResult {
+                    HStack(spacing: 6) {
+                        Label(msg, systemImage: "lock.shield")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.orange)
+                        Button("Authenticate") {
+                            Task {
+                                if await MFACoordinator.shared.ensureSession(for: profile) {
+                                    runTest()
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.accentColor)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .padding(16)

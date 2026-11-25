@@ -36,10 +36,16 @@ class AWSConfigReader {
                 currentRegion = nil
 
             } else if trimmed.hasPrefix("region") {
-                // Match region = us-east-1
+                // Match region = us-east-1, ignoring any trailing comment.
+                // This value is exported as AWS_DEFAULT_REGION, and an env
+                // region outranks the config file — so it must be clean.
                 let parts = trimmed.components(separatedBy: "=")
                 if parts.count == 2 {
-                    currentRegion = parts[1].trimmingCharacters(in: .whitespaces)
+                    let value = parts[1]
+                        .components(separatedBy: "#").first?
+                        .components(separatedBy: ";").first?
+                        .trimmingCharacters(in: .whitespaces) ?? ""
+                    currentRegion = value.isEmpty ? nil : value
                 }
             }
         }
