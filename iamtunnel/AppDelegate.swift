@@ -1,4 +1,5 @@
 import Cocoa
+import Combine
 import SwiftUI
 
 // Debug logging — only prints in Debug builds
@@ -13,10 +14,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
     var settingsWindow: NSWindow?
+    var setupWindow: NSWindow?
     private var sessionTimer: Timer?
     // Sessions already warned about, keyed by profile + expiry, so each
     // session gets one "expiring soon" notice.
     private var warnedSessions: Set<String> = []
+    private var autoPromptedSessions: Set<String> = []
+    private var lastActiveCount = 0
+    private var lastRendered = ""
+    private var clockTimer: Timer?
+    private var sessionChanges: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -54,6 +61,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 4. Watch MFA session expiry (STS tokens are short-lived)
         startSessionExpiryWatch()
+
+        // 5. First run: open the setup check until it has passed once.
+        if !UserDefaults.standard.bool(forKey: "setupCompleted") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self.openSetup() }
+        }
     }
 
     // ── MFA session expiry watcher ───────────────────────────
@@ -68,12 +80,42 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if self.warnedSessions.insert(key).inserted {
                     NotificationManager.shared.notifyMFAExpiringSoon(session: session)
                 }
+                // 10 min left and tunnels in use: open the renew prompt once,
+                // without taking keyboard focus.
+                if session.isUrgent, TunnelManager.shared.hasConnectedTunnel(profile: profile),
+                   self.autoPromptedSessions.insert(key).inserted {
+                    Task { @MainActor in MFACoordinator.shared.renewSession(for: profile, quiet: true) }
+                }
             }
             for profile in AWSSession.shared.pruneExpired() {
                 debugLog("🔐 MFA session expired for \(profile)")
-                NotificationManager.shared.notifyMFAExpired(profile: profile)
+                if TunnelManager.shared.hasConnectedTunnel(profile: profile) {
+                    Task { @MainActor in MFACoordinator.shared.promptExpired(profile: profile, quiet: true) }
+                } else {
+                    NotificationManager.shared.notifyMFAExpired(profile: profile)
+                }
             }
+            self.updateStatusIcon(activeCount: self.lastActiveCount)
         }
+        NotificationCenter.default.addObserver(
+            forName: .menuBarSettingsChanged, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.lastRendered = ""
+            self.updateStatusIcon(activeCount: self.lastActiveCount)
+        }
+        // Live countdown in the menu bar (redraws only when the text changes).
+        clockTimer?.invalidate()
+        clockTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.updateStatusIcon(activeCount: self.lastActiveCount)
+        }
+        // Renewed or cleared: put the normal icon back straight away.
+        sessionChanges = AWSSession.shared.$revision
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.updateStatusIcon(activeCount: self.lastActiveCount)
+            }
     }
 
     // iamtunnel://connect?name=… / ?port=…, iamtunnel://disconnect?…
@@ -91,15 +133,53 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // ── Update menu bar icon ─────────────────────────────────
+    // The MFA session that ends first (the one a tunnel would lose first).
+    private var soonestSession: MFASession? {
+        guard SettingsManager.shared.requireMFA else { return nil }
+        return AWSSession.shared.activeProfiles
+            .compactMap { AWSSession.shared.validSession(for: $0) }
+            .min { $0.expiration < $1.expiration }
+    }
+
+    // Menu bar: icon, then "⣿ 2 · 11h" (connections · MFA time left). In the
+    // last 20 minutes the icon becomes a lock and the text turns orange (red under 10).
     func updateStatusIcon(activeCount: Int) {
         guard let button = statusItem?.button else { return }
-        if SettingsManager.shared.showActiveCount && activeCount > 0 {
-            button.image = nil
-            button.title = "⣿ \(activeCount)"
+        lastActiveCount = activeCount
+        let settings = SettingsManager.shared
+
+        let session = soonestSession
+        let expiring = session?.isExpiringSoon == true
+        let urgent = session?.isUrgent == true
+        var parts: [String] = []
+        if settings.showActiveCount && activeCount > 0 { parts.append("⣿ \(activeCount)") }
+        if let session, settings.showSessionTime || expiring { parts.append(session.countdownLabel) }
+
+        let title = parts.isEmpty ? "" : " " + parts.joined(separator: " · ")
+        let tint: NSColor? = urgent ? .systemRed : (expiring ? .systemOrange : nil)
+        // Called every second: only touch the button when something visible changed.
+        let rendered = "\(title)|\(urgent)|\(expiring)"
+        guard rendered != lastRendered else { return }
+        lastRendered = rendered
+
+        let symbol = expiring ? "lock.trianglebadge.exclamationmark" : "point.3.connected.trianglepath.dotted"
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "iamtunnel")
+        image?.isTemplate = true
+        button.image = image
+        button.imagePosition = .imageLeading
+        button.contentTintColor = tint
+
+        var attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+        ]
+        if let tint { attributes[.foregroundColor] = tint }
+        button.attributedTitle = NSAttributedString(string: title, attributes: attributes)
+
+        if let session {
+            button.toolTip = "MFA session (\(session.profile)) valid until \(session.expiresAtLabel)"
+                + (expiring ? ". Click, then Renew." : "")
         } else {
-            button.title = ""
-            button.image = NSImage(systemSymbolName: "point.3.connected.trianglepath.dotted",
-                                   accessibilityDescription: "SSM Tunnel Manager")
+            button.toolTip = "iamtunnel"
         }
     }
 
@@ -120,6 +200,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // ── Open settings window ─────────────────────────────────
+    func openSetup() {
+        if setupWindow == nil {
+            let view = SetupAssistantView { [weak self] in self?.setupWindow?.close() }
+            let window = NSWindow(contentViewController: NSHostingController(rootView: view))
+            window.title = "iamtunnel setup"
+            window.styleMask = NSWindow.StyleMask([.titled, .closable])
+            window.isReleasedWhenClosed = false
+            window.center()
+            setupWindow = window
+        } else {
+            // Re-run the checks each time it is reopened.
+            setupWindow?.contentViewController = NSHostingController(
+                rootView: SetupAssistantView { [weak self] in self?.setupWindow?.close() })
+        }
+        popover?.performClose(nil)
+        setupWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     func openSettings() {
         if settingsWindow == nil {
             let hosting = NSHostingController(rootView: SettingsView())

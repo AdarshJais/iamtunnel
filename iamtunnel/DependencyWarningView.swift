@@ -40,8 +40,8 @@ struct DependencyWarningView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(Color.accentColor)
                 } else {
-                    Button(expanded ? "Hide" : "Details") {
-                        withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+                    Button("Fix…") {
+                        (NSApp.delegate as? AppDelegate)?.openSetup()
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 11))

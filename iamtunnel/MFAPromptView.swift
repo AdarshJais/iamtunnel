@@ -12,7 +12,9 @@ struct MFAPromptView: View {
     @State private var needsManualSerial = false
     @State private var isWorking = false
     @State private var errorMessage: String? = nil
-    @State private var durationHours: Int = SettingsManager.shared.mfaDurationHours
+    @State private var diagnosis: Diagnosis? = nil
+    // Always starts at the 12 h maximum; a shorter pick applies to this session only.
+    @State private var durationHours: Int = 12
 
     private var isValidCode: Bool {
         code.count == 6 && code.allSatisfy { $0.isNumber }
@@ -125,6 +127,14 @@ struct MFAPromptView: View {
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                } else if let diagnosis {
+                    DiagnosisCard(diagnosis: diagnosis) {
+                        // Files fixed here (leftover token) can be re-checked at once;
+                        // fixes done elsewhere (Terminal, AWS console) on the next try.
+                        if case .removeSessionToken = diagnosis.fix {
+                            Task { await runChecks() }
+                        }
+                    }
                 } else if let error = errorMessage {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.system(size: 11))
@@ -150,7 +160,7 @@ struct MFAPromptView: View {
                 Spacer()
 
                 Button(action: authenticate) {
-                    Text("Authenticate")
+                    Text("Authenticate · \(durationHours)h")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 14)
@@ -167,14 +177,27 @@ struct MFAPromptView: View {
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
         }
-        .frame(width: 380, height: needsManualSerial ? 380 : 340)
-        .task {
-            serial = await AWSSession.shared.discoverSerial(for: profile)
-            if serial == nil {
-                needsManualSerial = true
-                manualSerial = AWSSession.shared.cachedSerial(for: profile) ?? ""
-                errorMessage = MFAError.noDevice(profile).errorDescription
+        .frame(width: 380, height: diagnosis != nil ? 520 : (needsManualSerial ? 380 : 340))
+        .task { await runChecks() }
+    }
+
+    // Before asking for a code: catch a broken profile, then find the device.
+    private func runChecks() async {
+        diagnosis = nil
+        errorMessage = nil
+        if let early = AWSDoctor.preflight(profile: profile) {
+            diagnosis = early
+            return
+        }
+        serial = await AWSSession.shared.discoverSerial(for: profile)
+        if serial == nil {
+            if let keyProblem = await AWSDoctor.checkKeys(profile: profile).diagnosis {
+                diagnosis = keyProblem
+                return
             }
+            needsManualSerial = true
+            manualSerial = AWSSession.shared.cachedSerial(for: profile) ?? ""
+            errorMessage = MFAError.noDevice(profile).errorDescription
         }
     }
 
@@ -196,11 +219,14 @@ struct MFAPromptView: View {
                 isWorking = false
                 switch result {
                 case .success(let session):
-                    SettingsManager.shared.mfaDurationHours = durationHours
                     NotificationManager.shared.notifyMFASession(session: session)
                     onAuthenticated(session)
                 case .failure(let error):
                     code = ""
+                    if case .diagnosed(let found) = error {
+                        diagnosis = found
+                        return
+                    }
                     errorMessage = error.errorDescription
                     // Let the user correct the ARN when AWS rejects the device.
                     if case .noDevice = error { needsManualSerial = true }

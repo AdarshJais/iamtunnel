@@ -30,6 +30,32 @@ The app checks for all of these on launch and shows a warning if anything is mis
 
 ---
 
+## Setup check and error doctor
+
+Settings → **Setup check** (it also opens on first run, and from the warning banner's
+**Fix…**) checks everything a tunnel needs for real: AWS CLI, Session Manager plugin,
+your keys (with an actual `sts get-caller-identity` call), MFA device, your Mac's clock,
+saved tunnels and the MFA session. Anything missing gets one fix button.
+
+When AWS refuses a request, iamtunnel says why in plain words and offers a fix:
+
+| AWS error | iamtunnel says | Fix |
+|---|---|---|
+| `InvalidClientTokenId` with an `aws_session_token` line in the profile | leftover temporary token | **Remove it** (backs up `~/.aws/credentials` first) |
+| `InvalidClientTokenId` | access key deactivated or mistyped | opens the AWS keys page |
+| `SignatureDoesNotMatch` | secret key doesn't match | runs `aws configure` in Terminal |
+| invalid MFA code + clock off | your Mac's clock is N min off | opens Date & Time |
+| no keys for the profile | no AWS keys | runs `aws configure` in Terminal |
+
+The raw AWS message is always one click away ("AWS error", with Copy) for debugging.
+
+## Menu bar
+
+The icon shows connected tunnels and a live MFA countdown, e.g. `⣿ 2 · 11h 42m`. It
+turns orange under 20 minutes and red under 10 (counting seconds). With tunnels
+connected, the renew prompt opens by itself at 10 minutes left and at expiry, without
+taking keyboard focus. Sessions last up to 12 hours.
+
 ## Share tunnels with your team
 
 Settings → Connections → **Export…** writes your saved tunnels to a JSON file (names,

@@ -279,16 +279,17 @@ struct TunnelListView: View {
 
 // ── MFA session status row ───────────────────────────────────
 // "MFA default · until 21:40 · 3h 12m left  [Renew]". Turns orange in the
-// last 15 min and red when there is no session, so anyone can add a fresh
+// last 20 min, red in the last 10 and red when there is no session, so anyone can add a fresh
 // code before tunnels start failing.
 struct MFASessionStatusRow: View {
     let profile: String
     let revision: Int  // re-render when a session starts or is cleared
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 30)) { _ in
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
             let current = AWSSession.shared.session(for: profile).flatMap { $0.isValid ? $0 : nil }
-            let color: Color = current == nil ? .red : (current!.isExpiringSoon ? .orange : .green)
+            let color: Color = current == nil ? .red
+                : (current!.isUrgent ? .red : (current!.isExpiringSoon ? .orange : .green))
             HStack(spacing: 8) {
                 Image(systemName: current == nil ? "lock.slash" : "lock.shield")
                     .font(.system(size: 12))
