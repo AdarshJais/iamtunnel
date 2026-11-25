@@ -3,9 +3,10 @@ import Foundation
 // Opens and closes saved tunnels from a link, so scripts and coding agents can
 // ask for a tunnel without clicking the menu:
 //
-//   open -g "iamtunnel://connect?name=Hermes%20Stage"
-//   open -g "iamtunnel://connect?port=3307"
-//   open -g "iamtunnel://disconnect?name=Hermes%20Stage"
+//   open -g "iamtunnel://connect?name=Orders%20DB"
+//   open -g "iamtunnel://connect?port=3306"
+//   open -g "iamtunnel://disconnect?name=Orders%20DB"
+//   open "iamtunnel://import?file=/path/to/team-connections.json"   (asks first)
 //
 // Connect goes through the normal path, so the MFA prompt appears only when the
 // session has expired; the caller just waits for the local port to open.
@@ -19,6 +20,19 @@ final class URLCommandHandler {
         guard url.scheme?.lowercased() == "iamtunnel",
               let command = url.host?.lowercased() else { return }
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        // iamtunnel://import?file=/absolute/path.json — always asks before adding.
+        if command == "import" {
+            guard let path = query.first(where: { $0.name == "file" })?.value,
+                  path.hasPrefix("/"), path.lowercased().hasSuffix(".json"),
+                  FileManager.default.fileExists(atPath: path) else {
+                NotificationManager.shared.notifyLinkRejected(
+                    reason: "import needs file=/absolute/path/to/connections.json")
+                return
+            }
+            Task { @MainActor in ConnectionImporter.importFile(at: URL(fileURLWithPath: path)) }
+            return
+        }
+
         let name = query.first { $0.name == "name" }?.value
         let port = query.first { $0.name == "port" }?.value.flatMap(Int.init)
 

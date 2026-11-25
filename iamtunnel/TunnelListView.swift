@@ -139,6 +139,13 @@ struct TunnelListView: View {
         .onChange(of: tunnels.count) { _ in
             updatePopoverSize()
         }
+        // Connections imported from a file: reload, keeping live statuses.
+        .onReceive(NotificationCenter.default.publisher(for: .connectionsChanged)) { _ in
+            let status = Dictionary(uniqueKeysWithValues: tunnels.map { ($0.id, $0.status) })
+            tunnels = ConnectionStore.shared.load().map { t in
+                var t = t; t.status = status[t.id] ?? .stopped; return t
+            }
+        }
         // A tunnel opened or closed by an iamtunnel:// link.
         .onReceive(NotificationCenter.default.publisher(for: .tunnelStatusChangedByLink)) { note in
             guard let id = note.userInfo?["id"] as? UUID,
