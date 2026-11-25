@@ -30,6 +30,31 @@ The app checks for all of these on launch and shows a warning if anything is mis
 
 ---
 
+## Share tunnels with your team
+
+Settings → Connections → **Export…** writes your saved tunnels to a JSON file (names,
+SSM targets, hosts, ports; never credentials). A teammate imports it with **Import…** or:
+
+```bash
+open "iamtunnel://import?file=/absolute/path/team-connections.json"
+```
+
+iamtunnel always shows what it will add and waits for **Add**. Tunnels with an existing
+name or local port are skipped, never overwritten. Keep team files somewhere private:
+they don't grant access, but they do describe your infrastructure.
+
+```json
+{
+  "format": "iamtunnel-connections/1",
+  "name": "Acme staging",
+  "connections": [
+    { "name": "Orders DB", "profile": "default", "region": "ap-south-1",
+      "ssmTarget": "i-0123456789abcdef0", "remoteHost": "orders-db.abc123.ap-south-1.rds.amazonaws.com",
+      "remotePort": 3306, "localPort": 3306, "env": "staging" }
+  ]
+}
+```
+
 ## Open tunnels from scripts and coding agents
 
 iamtunnel 1.2.0+ handles `iamtunnel://` links, so a script or an agent like Claude Code
