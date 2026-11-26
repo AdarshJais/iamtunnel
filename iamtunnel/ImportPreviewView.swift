@@ -11,6 +11,12 @@ struct ImportPreviewView: View {
     var onAdd: () -> Void
     var onCancel: () -> Void
 
+    private var listHeight: CGFloat {
+        let rows = CGFloat(toAdd.count) * 50
+        let skippedBlock: CGFloat = skipped.isEmpty ? 0 : 30 + CGFloat(skipped.count) * 16
+        return min(rows + skippedBlock, 300)
+    }
+
     private var profiles: String {
         Array(Set(toAdd.map(\.profile))).sorted().joined(separator: ", ")
     }
@@ -66,7 +72,9 @@ struct ImportPreviewView: View {
                     }
                 }
             }
-            .frame(maxHeight: 280)
+            // An explicit height: a ScrollView with only a max height has no ideal
+            // height and collapsed to nothing in the window.
+            .frame(height: listHeight)
 
             Divider()
 
@@ -136,26 +144,31 @@ private struct ImportRow: View {
     }
 }
 
-// Shows the sheet as a modal window and returns true when Add is clicked.
+// Shows the preview in its own window and reports the choice through `onDone`.
+// Not modal: a modal session started from inside a SwiftUI button action (the
+// setup check's Import…) froze both windows, so Add and Cancel did nothing.
 @MainActor
 enum ImportPreview {
-    static func confirm(source: String, fileName: String, toAdd: [Tunnel], skipped: [String]) -> Bool {
-        var added = false
-        let view = ImportPreviewView(source: source, fileName: fileName, toAdd: toAdd, skipped: skipped) {
-            added = true
-            NSApp.stopModal()
-        } onCancel: {
-            NSApp.stopModal()
+    private static var window: NSWindow?
+
+    static func present(source: String, fileName: String, toAdd: [Tunnel], skipped: [String],
+                        onDone: @escaping (Bool) -> Void) {
+        window?.close()
+        let finish: (Bool) -> Void = { added in
+            window?.close()
+            window = nil
+            onDone(added)
         }
-        let window = NSWindow(contentViewController: NSHostingController(rootView: view))
-        window.title = "Import tunnels"
-        window.styleMask = [.titled]
-        window.isReleasedWhenClosed = false
-        window.center()
+        let view = ImportPreviewView(source: source, fileName: fileName, toAdd: toAdd, skipped: skipped,
+                                     onAdd: { finish(true) }, onCancel: { finish(false) })
+        let newWindow = NSWindow(contentViewController: NSHostingController(rootView: view))
+        newWindow.title = "Import tunnels"
+        newWindow.styleMask = [.titled, .closable]
+        newWindow.isReleasedWhenClosed = false
+        newWindow.level = .floating
+        newWindow.center()
+        window = newWindow
         NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-        NSApp.runModal(for: window)
-        window.orderOut(nil)
-        return added
+        newWindow.makeKeyAndOrderFront(nil)
     }
 }

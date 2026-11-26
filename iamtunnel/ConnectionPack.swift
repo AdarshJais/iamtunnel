@@ -107,12 +107,18 @@ enum ConnectionImporter {
             return
         }
 
-        guard ImportPreview.confirm(source: source, fileName: url.lastPathComponent,
-                                    toAdd: toAdd, skipped: skipped) else { return }
-
-        ConnectionStore.shared.save(existing + toAdd)
-        NotificationCenter.default.post(name: .connectionsChanged, object: nil)
-        debugLog("📥 Imported \(toAdd.count) tunnels from \(source)")
+        ImportPreview.present(source: source, fileName: url.lastPathComponent,
+                              toAdd: toAdd, skipped: skipped) { added in
+            guard added else { return }
+            // Re-read: tunnels may have changed while the preview was open.
+            let current = ConnectionStore.shared.load()
+            let fresh = toAdd.filter { t in
+                !current.contains { $0.name.lowercased() == t.name.lowercased() || $0.localPort == t.localPort }
+            }
+            ConnectionStore.shared.save(current + fresh)
+            NotificationCenter.default.post(name: .connectionsChanged, object: nil)
+            debugLog("📥 Imported \(fresh.count) tunnels from \(source)")
+        }
     }
 
     static func chooseAndImport() {
@@ -121,8 +127,11 @@ enum ConnectionImporter {
         panel.allowedContentTypes = [.json]
         panel.allowsMultipleSelection = false
         panel.message = "Choose an iamtunnel connections file"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        importFile(at: url)
+        // begin(), not runModal(): no nested modal loop inside a button action.
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            DispatchQueue.main.async { importFile(at: url) }
+        }
     }
 
     static func chooseAndExport() {
@@ -131,7 +140,13 @@ enum ConnectionImporter {
         panel.allowedContentTypes = [.json]
         panel.nameFieldStringValue = "iamtunnel-connections.json"
         panel.message = "Exports names, targets, hosts and ports. No credentials are included."
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            writeExport(to: url)
+        }
+    }
+
+    private static func writeExport(to url: URL) {
         let pack = ConnectionPack(format: ConnectionPack.formatID, name: nil,
                                   connections: ConnectionStore.shared.load().map(ConnectionPack.Entry.init))
         let encoder = JSONEncoder()

@@ -15,6 +15,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var popover: NSPopover?
     var settingsWindow: NSWindow?
     var setupWindow: NSWindow?
+    var newConnectionWindow: NSWindow?
     private var sessionTimer: Timer?
     // Sessions already warned about, keyed by profile + expiry, so each
     // session gets one "expiring soon" notice.
@@ -216,6 +217,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         popover?.performClose(nil)
         setupWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // "New connection" form outside the menu (used by the setup check).
+    // Saving goes through the store, and the tunnel list reloads from it.
+    func openNewConnection() {
+        newConnectionWindow?.close()
+        let view = NewConnectionView { [weak self] tunnel in
+            ConnectionStore.shared.save(ConnectionStore.shared.load() + [tunnel])
+            NotificationCenter.default.post(name: .connectionsChanged, object: nil)
+            self?.newConnectionWindow?.close()
+        } onCancel: { [weak self] in
+            self?.newConnectionWindow?.close()
+        }
+        let window = NSWindow(contentViewController: NSHostingController(rootView: view))
+        window.title = "New Connection"
+        window.styleMask = NSWindow.StyleMask([.titled, .closable])
+        window.setContentSize(NSSize(width: 400, height: 420))
+        window.isReleasedWhenClosed = false
+        window.center()
+        newConnectionWindow = window
+        window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 

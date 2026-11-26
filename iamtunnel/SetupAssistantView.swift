@@ -8,7 +8,8 @@ struct SetupStep: Identifiable {
         case checking
         case ok(String)
         case problem(Diagnosis)
-        case todo(detail: String, actionLabel: String, action: @MainActor () -> Void)
+        case todo(detail: String, actionLabel: String, action: @MainActor () -> Void,
+                  secondLabel: String? = nil, secondAction: (@MainActor () -> Void)? = nil)
         case waiting(String) // can't check until an earlier step passes
     }
 
@@ -97,8 +98,10 @@ final class SetupModel: ObservableObject {
         let count = ConnectionStore.shared.load().count
         set("tunnels", count > 0
             ? .ok("\(count) saved")
-            : .todo(detail: "None yet. Import your team's connections file, or add one with New connection.",
-                    actionLabel: "Import…", action: { ConnectionImporter.chooseAndImport() }))
+            : .todo(detail: "None yet. Import your team's connections file, or add one by hand.",
+                    actionLabel: "Import…", action: { ConnectionImporter.chooseAndImport() },
+                    secondLabel: "New connection…",
+                    secondAction: { (NSApp.delegate as? AppDelegate)?.openNewConnection() }))
 
         if !SettingsManager.shared.requireMFA {
             set("session", .ok("MFA not required (Settings)"))
@@ -179,6 +182,9 @@ struct SetupAssistantView: View {
         }
         .frame(width: 460, height: 560)
         .task { await model.run() }
+        .onReceive(NotificationCenter.default.publisher(for: .connectionsChanged)) { _ in
+            Task { await model.run() }
+        }
     }
 }
 
@@ -198,10 +204,15 @@ private struct SetupStepRow: View {
                     Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
                 case .waiting(let detail):
                     Text(detail).font(.system(size: 11)).foregroundStyle(.tertiary)
-                case .todo(let detail, let label, let action):
+                case .todo(let detail, let label, let action, let secondLabel, let secondAction):
                     Text(detail).font(.system(size: 11)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Button(label) { action() }.controlSize(.small)
+                    HStack(spacing: 8) {
+                        Button(label) { action() }.controlSize(.small)
+                        if let secondLabel, let secondAction {
+                            Button(secondLabel) { secondAction() }.controlSize(.small)
+                        }
+                    }
                 case .problem(let diagnosis):
                     DiagnosisCard(diagnosis: diagnosis) {
                         if case .removeSessionToken = diagnosis.fix { recheck() }
